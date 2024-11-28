@@ -6,9 +6,9 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputText
 from telethon import TelegramClient, events
 
 # Bot configuration
-BOT_TOKEN = os.environ.get("6228122908:AAEKGwokHIjvYsH6qgthcz5G-sOdL3Aq45o")
+BOT_TOKEN = "6228122908:AAEKGwokHIjvYsH6qgthcz5G-sOdL3Aq45o"
 API_ID = 18979569
-API_HASH = os.environ.get("45db354387b8122bdf6c1b0beef93743")
+API_HASH = "45db354387b8122bdf6c1b0beef93743"
 SESSION_NAME = "session_generator"
 
 # Create the Pyrogram client
