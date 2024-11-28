@@ -1,78 +1,120 @@
-
-import os
-import asyncio
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputTextMessageContent
-from telethon import TelegramClient, events
+from telethon import TelegramClient
+from telethon.errors import SessionPasswordNeededError
+from pyrogram import Client as PyroClient
+from pyrogram.errors import SessionPasswordNeeded
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton, Update
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
 
 # Bot configuration
-BOT_TOKEN = "6228122908:AAEKGwokHIjvYsH6qgthcz5G-sOdL3Aq45o"
-API_ID = 18979569
-API_HASH = "45db354387b8122bdf6c1b0beef93743"
-SESSION_NAME = "session_generator"
+BOT_TOKEN = "6228122908:AAEKGwokHIjvYsH6qgthcz5G-sOdL3Aq45o"  # Replace with your bot token
+bot_data = {}  # Temporary storage for user interaction steps
 
-# Create the Pyrogram client
-pyrogram_client = Client(SESSION_NAME, api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# Start command
+def start(update: Update, context: CallbackContext):
+    update.message.reply_text(
+        "Welcome to the Session String Generator Bot!\n\n"
+        "Click a button below to generate your session string.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Generate Telethon String", callback_data="telethon")],
+            [InlineKeyboardButton("Generate Pyrogram String", callback_data="pyrogram")]
+        ])
+    )
 
-async def start():
-    await pyrogram_client.start()
+# Button selection handler
+def handle_button(update: Update, context: CallbackContext):
+    query = update.callback_query
+    user_id = query.from_user.id
 
-    await ask_api_id()
-    await ask_api_hash()
-    await ask_bot_token_or_phone_number()
+    if query.data == "telethon":
+        bot_data[user_id] = {"type": "telethon"}
+        query.edit_message_text("You selected Telethon. Please enter your **API ID**.")
+    elif query.data == "pyrogram":
+        bot_data[user_id] = {"type": "pyrogram"}
+        query.edit_message_text("You selected Pyrogram. Please enter your **API ID**.")
 
-async def ask_api_id():
-    await pyrogram_client.send_message("me", "Enter your API ID:")
-    api_id = await pyrogram_client.listen(InputTextMessageContent)
-    return api_id
+# Handle user input for API ID, API Hash, and phone number
+def handle_user_input(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
 
-async def ask_api_hash():
-    await pyrogram_client.send_message("me", "Enter your API Hash:")
-    api_hash = await pyrogram_client.listen(InputTextMessageContent)
-    return api_hash
+    if user_id not in bot_data:
+        update.message.reply_text("Please start by clicking /start.")
+        return
 
-async def ask_bot_token_or_phone_number():
-    buttons = [
-        [InlineKeyboardButton("Bot Token", callback_data="bot_token")],
-        [InlineKeyboardButton("Phone Number", callback_data="phone_number")]
-    ]
-    await pyrogram_client.send_message("me", "Select an option:", reply_markup=InlineKeyboardMarkup(buttons))
+    user_step = bot_data[user_id].get("step", "api_id")
 
-async def generate_session(bot_token=None, phone_number=None):
-    if bot_token:
-        # Generate session string using bot token
-        await pyrogram_client.send_message("me", "Generating session string using bot token...")
-        session_string = await pyrogram_client.generate_session_string(bot_token)
-        await pyrogram_client.send_message("me", f"Session string: {session_string}")
-    elif phone_number:
-        # Send OTP to Telegram and verify
-        await pyrogram_client.send_message("me", "Sending OTP to Telegram...")
-        otp = await pyrogram_client.send_code(phone_number)
-        await pyrogram_client.send_message("me", "Enter the OTP:")
-        otp_input = await pyrogram_client.listen(InputTextMessageContent)
-        if otp_input == otp:
-            # Check 2-step verification
-            await pyrogram_client.send_message("me", "Checking 2-step verification...")
-            if await pyrogram_client.check_2fa(phone_number):
-                # Generate session string
-                await pyrogram_client.send_message("me", "Generating session string...")
-                session_string = await pyrogram_client.generate_session_string(phone_number)
-                await pyrogram_client.send_message("me", f"Session string: {session_string}")
-            else:
-                await pyrogram_client.send_message("me", "2-step verification is not enabled.")
+    if user_step == "api_id":
+        bot_data[user_id]["api_id"] = update.message.text
+        bot_data[user_id]["step"] = "api_hash"
+        update.message.reply_text("Great! Now enter your **API Hash**.")
+    elif user_step == "api_hash":
+        bot_data[user_id]["api_hash"] = update.message.text
+        bot_data[user_id]["step"] = "phone_number"
+        update.message.reply_text("Perfect! Now enter your **phone number** (with country code).")
+    elif user_step == "phone_number":
+        bot_data[user_id]["phone_number"] = update.message.text
+        session_type = bot_data[user_id]["type"]
+        if session_type == "telethon":
+            generate_telethon_session(update, context, user_id)
+        elif session_type == "pyrogram":
+            generate_pyrogram_session(update, context, user_id)
+
+# Generate Telethon session string
+def generate_telethon_session(update: Update, context: CallbackContext, user_id):
+    api_id = bot_data[user_id]["api_id"]
+    api_hash = bot_data[user_id]["api_hash"]
+    phone_number = bot_data[user_id]["phone_number"]
+
+    client = TelegramClient("telethon_session", int(api_id), api_hash)
+
+    try:
+        client.start(phone=phone_number)
+        if client.is_user_authorized():
+            session_string = client.session.save()
+            update.message.reply_text(f"Your Telethon Session String:\n\n`{session_string}`\n\nKeep it safe!")
         else:
-            await pyrogram_client.send_message("me", "Invalid OTP.")
+            update.message.reply_text("Failed to authenticate. Please check your credentials and try again.")
+    except SessionPasswordNeededError:
+        update.message.reply_text("Two-step verification is enabled. Please provide your password.")
+    except Exception as e:
+        update.message.reply_text(f"An error occurred: {e}")
+    finally:
+        client.disconnect()
+        bot_data.pop(user_id, None)
 
-@pyrogram_client.on_callback_query()
-async def callback_query_handler(_, callback_query):
-    if callback_query.data == "bot_token":
-        await pyrogram_client.send_message("me", "Enter your bot token:")
-        bot_token = await pyrogram_client.listen(InputTextMessageContent)
-        await generate_session(bot_token=bot_token)
-    elif callback_query.data == "phone_number":
-        await pyrogram_client.send_message("me", "Enter your phone number:")
-        phone_number = await pyrogram_client.listen(InputTextMessageContent)
-        await generate_session(phone_number=phone_number)
+# Generate Pyrogram session string
+def generate_pyrogram_session(update: Update, context: CallbackContext, user_id):
+    api_id = bot_data[user_id]["api_id"]
+    api_hash = bot_data[user_id]["api_hash"]
+    phone_number = bot_data[user_id]["phone_number"]
+
+    client = PyroClient("pyrogram_session", api_id=int(api_id), api_hash=api_hash)
+
+    try:
+        client.start(phone_number)
+        if client.is_user_authorized():
+            session_string = client.export_session_string()
+            update.message.reply_text(f"Your Pyrogram Session String:\n\n`{session_string}`\n\nKeep it safe!")
+        else:
+            update.message.reply_text("Failed to authenticate. Please check your credentials and try again.")
+    except SessionPasswordNeeded:
+        update.message.reply_text("Two-step verification is enabled. Please provide your password.")
+    except Exception as e:
+        update.message.reply_text(f"An error occurred: {e}")
+    finally:
+        client.stop()
+        bot_data.pop(user_id, None)
+
+# Main function
+def main():
+    updater = Updater(BOT_TOKEN)
+    dp = updater.dispatcher
+
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CallbackQueryHandler(handle_button))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_user_input))
+
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
-    asyncio.get_event_loop().run_until_complete(start())
+    main()
