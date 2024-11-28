@@ -11,6 +11,7 @@ bot_data = {}  # Temporary storage for user interaction steps
 
 # Start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Sends a message with inline buttons for selecting the session type
     await update.message.reply_text(
         "Welcome to the Session String Generator Bot!\n\n"
         "Click a button below to generate your session string.",
@@ -72,11 +73,38 @@ async def generate_telethon_session(update: Update, context: ContextTypes.DEFAUL
             session_string = client.session.save()
             await update.message.reply_text(f"Your Telethon Session String:\n\n`{session_string}`\n\nKeep it safe!")
         else:
-            await update.message.reply_text("Failed to authenticate. Please check your credentials and try again.")
+            # Send OTP request via the bot's PM
+            otp_msg = "Two-step verification is enabled. Please provide the **OTP** sent to your Telegram app."
+            await update.message.reply_text(otp_msg)
+            bot_data[user_id]["step"] = "otp"
     except SessionPasswordNeededError:
         await update.message.reply_text("Two-step verification is enabled. Please provide your password.")
     except Exception as e:
         await update.message.reply_text(f"An error occurred: {e}")
+    finally:
+        await client.disconnect()
+
+# Handle OTP input for Telethon
+async def handle_otp_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+
+    if user_id not in bot_data or bot_data[user_id].get("step") != "otp":
+        return  # Ignore if not expecting OTP
+
+    otp = update.message.text.strip()  # Get OTP entered by the user
+
+    api_id = bot_data[user_id]["api_id"]
+    api_hash = bot_data[user_id]["api_hash"]
+    phone_number = bot_data[user_id]["phone_number"]
+
+    client = TelegramClient("telethon_session", int(api_id), api_hash)
+
+    try:
+        await client.start(phone=phone_number, password=otp)
+        session_string = client.session.save()
+        await update.message.reply_text(f"Your Telethon Session String:\n\n`{session_string}`\n\nKeep it safe!")
+    except Exception as e:
+        await update.message.reply_text(f"Failed to authenticate with OTP: {e}")
     finally:
         await client.disconnect()
         bot_data.pop(user_id, None)
@@ -106,12 +134,16 @@ async def generate_pyrogram_session(update: Update, context: ContextTypes.DEFAUL
 
 # Main function
 def main():
+    # Create the application and pass in your bot's token
     application = Application.builder().token(BOT_TOKEN).build()
 
+    # Add the handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(handle_button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_input))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_otp_input))
 
+    # Start the bot
     application.run_polling()
 
 if __name__ == "__main__":
