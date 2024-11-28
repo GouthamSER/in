@@ -64,9 +64,9 @@ async def main() -> None:
     # Add handler for text messages
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Start the Bot asynchronously without closing the event loop
+    # Start the Bot asynchronously without manually managing the event loop
     await application.run_polling()
 
 if __name__ == '__main__':
-    # If you're using an existing event loop, we avoid creating a new one
-    asyncio.get_event_loop().run_until_complete(main())
+    # Just call the main function, let `python-telegram-bot` handle the event loop
+    asyncio.run(main())
